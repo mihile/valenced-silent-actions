@@ -23,7 +23,7 @@ export function canReplaceEdit(message: Message, content: unknown): boolean {
 export async function replaceMessage(http: HTTP, endpoints: Endpoints, message: Message, content: string, deleting: boolean, sleep: (ms: number) => Promise<unknown>) {
  const response = await http.post({
   url: endpoints.MESSAGES(message.channel_id),
-  body: { content, nonce: message.id, flags: 4096, tts: false, mobile_network_type: 'unknown', allowed_mentions: { parse: [], replied_user: false } },
+  body: { content, nonce: message.id, flags: 0, tts: false, mobile_network_type: 'unknown', allowed_mentions: { parse: [], replied_user: false } },
  })
  const replacement = response?.body?.id
  if (!replacement || replacement === message.id) throw new Error('Replacement ID was not confirmed')

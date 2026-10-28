@@ -18,7 +18,7 @@ describe('silent operations', () => {
   const {calls, http} = mock()
   await replaceMessage(http, endpoints, message, 'new', false, noWait)
   expect(calls.map(x => x.method)).toEqual(['post', 'del'])
-  expect(calls[0].body).toMatchObject({content: 'new', nonce: '123', flags: 4096, allowed_mentions: {parse: []}})
+  expect(calls[0].body).toMatchObject({content: 'new', nonce: '123', flags: 0, allowed_mentions: {parse: []}})
   expect(calls[1].url).toEndWith('/123')
  })
  test('delete removes the placeholder before the original', async () => {

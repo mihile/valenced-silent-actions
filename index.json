@@ -9,8 +9,8 @@
       "author": "mihile (https://github.com/mihile \"GitHub\")",
       "icon": "ChatIcon",
       "channels": {
-        "beta": "0.2.0-beta",
-        "latest": "0.2.0-beta"
+        "beta": "0.2.1-beta",
+        "latest": "0.2.1-beta"
       },
       "versions": {
         "0.1.0-beta": {
@@ -30,6 +30,19 @@
           "url": "https://mihile.github.io/valenced-silent-actions/pool/mihile.silent-actions@0.2.0-beta.zip",
           "sha256": "b92c3d132cbaa72fbb8cac3b499b790009601085ac89d915e23fa44052cfc23a",
           "size": 2258,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": ">=352.2"
+            }
+          }
+        },
+        "0.2.1-beta": {
+          "url": "https://mihile.github.io/valenced-silent-actions/pool/mihile.silent-actions@0.2.1-beta.zip",
+          "sha256": "9738f45bf0470a0db7fea057707f625290f834f90e72607d7320b8830c100059",
+          "size": 2252,
           "dependencies": {
             "valenced.api": {
               "version": ">=1 <2"
