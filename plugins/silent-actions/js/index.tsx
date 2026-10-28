@@ -1,51 +1,54 @@
-import { ActionSheetActionCreators, AlertActionCreators } from '@valenced/discord/actions'
+import { AlertActionCreators } from '@valenced/discord/actions'
 import { Design } from '@valenced/discord/design'
 import { Stores } from '@valenced/discord/flux'
 import { getModules } from '@valenced/modules/finders'
 import { withName, withProps } from '@valenced/modules/finders/filters'
 import { instead } from '@valenced/patcher'
-import { useState } from 'react'
+import { canReplaceEdit, replaceMessage } from './operation'
+import type { Message, HTTP, Endpoints } from './operation'
+import type { JsonStorage } from '@valenced/json-storage'
 import type { FC, ReactElement, ReactNode } from 'react'
 
-const { ActionSheet, ActionSheetRow, AlertModal, AlertActionButton, TextInput } = Design
-const alertKey = 'mihile.silent-actions'
-type Message = { id: string; channel_id: string; content: string; author: { id: string }; attachments?: unknown[]; message_reference?: unknown; messageReference?: unknown; type?: number }
+const { ActionSheet, ActionSheetRow, TableCheckboxRow, AlertModal, AlertActionButton } = Design
+const alertKey = 'mihile.silent-actions.error'
+type Settings = { enabled: boolean }
 type Tree = ReactElement<{children?: ReactNode}>
 type Sheet = FC<{message: Message}>
-type HTTP = { post(options: object): Promise<{body?: {id?: string}}> ; del(options: object): Promise<unknown> }
-type Endpoints = { MESSAGES(id: string): string; MESSAGE(channel: string, message: string): string }
+type EditActions = { sendMessage: unknown; editMessage(channel: string, id: string, data: {content?: unknown}): Promise<unknown> }
+type DeleteActions = { deleteMessage(channel: string, id: string, ...rest: unknown[]): Promise<unknown> }
+type MessageStore = { getMessage(channel: string, id: string): Message | undefined }
 let http: HTTP | undefined
 let endpoints: Endpoints | undefined
+let storage: JsonStorage<Settings>
+let editReady = false
+let deleteReady = false
 const busy = new Set<string>()
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
+function error(message: string) {
+ AlertActionCreators.openAlert(alertKey, <AlertModal title="Silent Actions" content={message} actions={<AlertActionButton text="OK" variant="primary" />} />)
+}
+function getMessage(channel: string, id: string) {
+ return (Stores.MessageStore as unknown as MessageStore)?.getMessage(channel, id)
+}
+function own(message: Message) {
+ const auth = Stores.AuthenticationStore as unknown as { getId(): string }
+ return !!message.author?.id && message.author.id === auth?.getId()
+}
 async function run(message: Message, content: string, deleting: boolean) {
- if (busy.has(message.id)) return
+ if (busy.has(message.id)) throw new Error('Action already in progress')
+ if (!http || !endpoints) {
+  error('Discord message services are unavailable. No action was performed.')
+  throw new Error('Discord message services unavailable')
+ }
  busy.add(message.id)
- let replacement: string | undefined
  try {
-  if (!http || !endpoints) throw new Error('Discord HTTP modules are unavailable.')
-  const response = await http.post({url: endpoints.MESSAGES(message.channel_id), body: {content, nonce: message.id, flags: 4096, tts: false, mobile_network_type: 'unknown', allowed_mentions: {parse: [], replied_user: false}}})
-  replacement = response?.body?.id
-  if (!replacement || replacement === message.id) throw new Error('Replacement ID was not confirmed. The original was not deleted.')
-  await sleep(500)
-  if (deleting) {
-   await http.del({url: endpoints.MESSAGE(message.channel_id, replacement)})
-   await sleep(100)
-  }
-  await http.del({url: endpoints.MESSAGE(message.channel_id, message.id)})
- } catch (error) {
-  console.error('[Silent Actions]', error)
-  AlertActionCreators.openAlert(alertKey + '.error', <AlertModal title="Silent action failed" content={replacement ? 'A replacement was sent, but a deletion failed. Check the channel before retrying.' : 'The original was not deleted. A replacement may have been sent; check the channel before retrying.'} actions={<AlertActionButton text="OK" variant="primary" />} />)
+  return await replaceMessage(http, endpoints, message, content, deleting, sleep)
+ } catch (e) {
+  console.error('[Silent Actions]', e)
+  error('The action failed. A replacement may have been sent or deleted. Check the channel before retrying.')
+  throw e
  } finally { busy.delete(message.id) }
-}
-
-function EditDialog({message}: {message: Message}) {
- const [content, setContent] = useState(message.content)
- return <AlertModal title="Silent Edit" content="Sends a replacement and deletes the original." extraContent={<TextInput label="Message" defaultValue={message.content} onChange={setContent} />} actions={<><AlertActionButton text="Cancel" variant="secondary" /><AlertActionButton text="Send" variant="primary" onPress={() => { if (content.trim() && content !== message.content) void run(message, content, false) }} /></>} />
-}
-function openDelete(message: Message) {
- AlertActionCreators.openAlert(alertKey, <AlertModal title="Silent Delete" content="Sends and deletes a placeholder, then deletes the original message." actions={<><AlertActionButton text="Cancel" variant="secondary" /><AlertActionButton text="Delete" variant="destructive" onPress={() => void run(message, '** **', true)} /></>} />)
 }
 function findSheet(element: unknown): Tree | undefined {
  if (Array.isArray(element)) { for (const child of element) { const found = findSheet(child); if (found) return found } return }
@@ -54,28 +57,61 @@ function findSheet(element: unknown): Tree | undefined {
  if (node.type === ActionSheet) return node
  return findSheet(node.props?.children)
 }
-export default plugin({
- start({cleanup, plugin}) {
+function Toggle() {
+ const enabled = storage.use()?.enabled ?? true
+ const ready = !!http && !!endpoints && editReady && deleteReady
+ return <ActionSheetRow.Group><TableCheckboxRow label="Silent Actions" subLabel={ready ? 'Apply to your edits and deletes' : 'Message actions unavailable'} value="silent-actions" checked={enabled} onPress={() => storage.set({enabled: !enabled})} /></ActionSheetRow.Group>
+}
+export default plugin<{jsonStorage: Settings}>({
+ jsonStorage: {load: true, default: {enabled: true}},
+ start({cleanup, plugin, jsonStorage}) {
+  storage = jsonStorage
   cleanup(getModules(withProps<{HTTP: HTTP}>('HTTP'), x => { if (typeof (x.HTTP as Partial<HTTP>)?.post === 'function' && typeof (x.HTTP as Partial<HTTP>)?.del === 'function') http = x.HTTP }))
   cleanup(getModules(withProps<{Endpoints: Endpoints}>('Endpoints'), x => { if (typeof (x.Endpoints as Partial<Endpoints>)?.MESSAGES === 'function' && typeof (x.Endpoints as Partial<Endpoints>)?.MESSAGE === 'function') endpoints = x.Endpoints }))
+  cleanup(getModules(withProps<EditActions>('sendMessage', 'editMessage'), actions => {
+   editReady = true
+   cleanup(instead(actions, 'editMessage', function (args, original) {
+    if (!(storage.cache?.enabled ?? true)) return Reflect.apply(original, this, args)
+    const [channel, id, data] = args
+    const message = getMessage(channel, id)
+    if (!message || !own(message)) {
+     error('Could not verify the message owner. Disable Silent Actions to edit normally.')
+     return Promise.reject(new Error('Message owner unavailable'))
+    }
+    if (!canReplaceEdit(message, data?.content)) {
+     error('This message cannot be replaced safely. Disable Silent Actions to edit it normally.')
+     return Promise.reject(new Error('Unsupported silent edit'))
+    }
+    return run(message, data.content as string, false)
+   }))
+  }))
+  cleanup(getModules(withProps<DeleteActions>('deleteMessage'), actions => {
+   if (typeof actions.deleteMessage !== 'function') return
+   deleteReady = true
+   cleanup(instead(actions, 'deleteMessage', function (args, original) {
+    if (!(storage.cache?.enabled ?? true)) return Reflect.apply(original, this, args)
+    const [channel, id] = args
+    if (typeof channel !== 'string' || typeof id !== 'string' || !/^\d+$/.test(channel) || !/^\d+$/.test(id)) return Reflect.apply(original, this, args)
+    const message = getMessage(channel, id)
+    if (!message) {
+     error('Could not verify the message owner. Disable Silent Actions to delete normally.')
+     return Promise.reject(new Error('Message owner unavailable'))
+    }
+    if (!own(message)) return Reflect.apply(original, this, args)
+    return run(message, '** **', true)
+   }))
+  }))
   cleanup(getModules(withName<Sheet>('LongPressMessageActionSheet'), mod => {
    const namespace = mod as unknown as {default: Sheet}
    cleanup(instead(namespace, 'default', (args, original) => {
     const tree = Reflect.apply(original, undefined, args) as Tree
     try {
-     const message = args[0]?.message
-     const auth = Stores.AuthenticationStore as unknown as { getId(): string }
-     if (!message || !http || !endpoints || message.author?.id !== auth?.getId() || !message.id || !message.channel_id || message.type && message.type !== 0 && message.type !== 19) return tree
      const sheet = findSheet(tree)
-     if (!sheet) return tree
-     const close = (fn: () => void) => () => { ActionSheetActionCreators.hideActionSheet(); fn() }
-     const editable = !!message.content && !message.attachments?.length && !message.message_reference && !message.messageReference
-     const group = <ActionSheetRow.Group key="silent-actions">{editable && <ActionSheetRow label="Silent Edit" onPress={close(() => AlertActionCreators.openAlert(alertKey, <EditDialog message={message} />))} />}<ActionSheetRow label="Silent Delete" variant="danger" onPress={close(() => openDelete(message))} /></ActionSheetRow.Group>
-     sheet.props.children = [...[sheet.props.children].flat().filter(Boolean), group]
-    } catch (error) { plugin.reportError(`Silent Actions menu: ${String(error)}`) }
+     if (sheet) sheet.props.children = [...[sheet.props.children].flat().filter(Boolean), <Toggle key="silent-actions" />]
+    } catch (e) { plugin.reportError(`Silent Actions menu: ${String(e)}`) }
     return tree
    }))
   }, {returnNamespace: true}))
-  cleanup(() => { http = undefined; endpoints = undefined; AlertActionCreators.dismissAlert(alertKey) })
+  cleanup(() => { http = undefined; endpoints = undefined; editReady = false; deleteReady = false; AlertActionCreators.dismissAlert(alertKey) })
  }
 })

@@ -5,18 +5,31 @@
   "plugins": {
     "mihile.silent-actions": {
       "name": "Silent Actions",
-      "description": "Replace your text messages for silent edits and deletes.",
+      "description": "Apply silent replacements to your normal message edits and deletes.",
       "author": "mihile (https://github.com/mihile \"GitHub\")",
       "icon": "ChatIcon",
       "channels": {
-        "beta": "0.1.0-beta",
-        "latest": "0.1.0-beta"
+        "beta": "0.2.0-beta",
+        "latest": "0.2.0-beta"
       },
       "versions": {
         "0.1.0-beta": {
           "url": "https://mihile.github.io/valenced-silent-actions/pool/mihile.silent-actions@0.1.0-beta.zip",
           "sha256": "04f4702e341e63426c515ba0991c0b649afad1670adf260ca744107baf1810aa",
           "size": 2066,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": ">=352.2"
+            }
+          }
+        },
+        "0.2.0-beta": {
+          "url": "https://mihile.github.io/valenced-silent-actions/pool/mihile.silent-actions@0.2.0-beta.zip",
+          "sha256": "b92c3d132cbaa72fbb8cac3b499b790009601085ac89d915e23fa44052cfc23a",
+          "size": 2258,
           "dependencies": {
             "valenced.api": {
               "version": ">=1 <2"
